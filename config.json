@@ -1,0 +1,6 @@
+{
+    "RESUME_WATCH_PATH": "../RESUME",
+    "SUPPORTED_EXTENSIONS": [".pdf", ".docx", ".txt"],
+    "model_extractor": "qwen3.5:4b",
+    "model_chat_agent": "qwen3.5:4b"
+}
