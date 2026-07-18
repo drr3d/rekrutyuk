@@ -1,14 +1,14 @@
 # 🤖 RekrutYuk
 
-Platform pintar untuk otomatisasi rekrutmen, parsing CV, dan *screening* otomatis yang berjalan **100% lokal** di PC Anda! Tidak ada kebocoran data pelamar, tidak ada biaya API dolar bulanan. Cukup pasang, dan biarkan sistem Agen AI mengelola alur Recruitment Anda secara mandiri 💼✨
+AI Based recruitment Platform untuk otomatisasi recruitment, parsing CV, dan *screening* otomatis yang berjalan **100% lokal** di PC Anda! Tidak ada kebocoran data pelamar, tidak ada biaya API dolar bulanan. Cukup pasang, dan biarkan sistem Agen AI mengelola alur Recruitment Anda secara mandiri 💼✨
 
 ---
 
 ### 🧠 The Tech Stack Inside
-*   **The Brain:** [Ollama](https://ollama.com/) + **Qwen3.5:4B** (Model cerdas, lincah, dan sangat pas untuk VRAM lokal)
+*   **The Brain:** [Ollama](https://ollama.com/) + **Qwen3.5:4B** (Model Kecil tapi handal, dan sangat pas untuk VRAM lokal)
 *   **The Orchestrator:** **LangGraph** & **LangChain** (Arsitektur Agentic AI sejati dengan State Machine dinamis)
 *   **The Knowledge:** **ChromaDB** (Vektor database untuk Unstructured RAG) & **SQLite** (Structured RAG & memori permanen)
-*   **The Interface Control:** **Telegram Bot API & Local Watchdog** (Kendalikan rekrutmen dan beri persetujuan langsung lewat jempol Anda!)
+*   **The Interface Control:** **Telegram Bot API & Local Watchdog** (Data Ingestion stage.)
 *   **The Runtime:** **Python 3.11** 🐍
 
 ---
@@ -27,7 +27,7 @@ Aplikasi **RekrutYuk** ini bukan sekadar aplikasi CRUD biasa atau chatbot pasif,
 ### 🎯 What Makes It Awesome?
 
 *   **Human-in-the-Loop (HITL) Guardrail:** Aksi sensitif (seperti posting lowongan atau hapus data) dikunci oleh interupsi graf. AI tidak akan mengeksekusi ke database sebelum mengirimkan notifikasi konfirmasi ke Telegram Anda. Tekan **"IYA"**, baru Agen AI bergerak!
-*   **Anti-Amnesia Persistent Memory:** Ditenagai oleh `SqliteSaver`, Agen AI ini punya memori jangka panjang yang abadi. Biarpun aplikasi di-restart atau komputer mati, Agen tetap ingat siapa kandidat terakhir yang sedang dibahas dan apa tugas terpendingnya.
-*   **Universal Polymorphic Ingestion:** Mesin pemroses *Agentic RAG* di dalam RekrutYuk dirancang modular. Hari ini Anda pakai untuk membaca CV rekrutmen, besok-besok logika engine ini bisa di-*jumper* untuk membaca nota penjualan sales atau manajemen inventori secara instan!
+*   **Anti-Amnesia Persistent Memory:** Ditenagai oleh `SqliteSaver`, yang membuat agen AI ini punya memori jangka panjang. Biarpun aplikasi di-restart atau komputer mati, Agen tetap ingat siapa kandidat terakhir yang sedang dibahas dan apa tugas terpendingnya.
+*   **Universal Polymorphic Ingestion:** Mesin pemroses *Agentic RAG* di dalam RekrutYuk dirancang modular. Hari ini Anda pakai untuk membaca CV recruitment, besok-besok logika engine ini bisa di-*jumper* untuk membaca nota penjualan sales atau manajemen inventori secara instan!
 
 ---
