@@ -20,10 +20,10 @@ from knowledgeprocessor import generate_interview_questions, process_hr_knowledg
 
 # --- KONFIGURASI DATABASE & LLM ---
 app_dir = Path(__file__).resolve().parent
-db_path = (app_dir / "../chroma_db").resolve()
+db_path = (app_dir / "../APPDB/chroma_db").resolve()
 json_path = app_dir / "kandidat_profil.json"
 config_path = app_dir / "config.json"
-sqlite_db_path = app_dir / "hr_database.db"
+sqlite_db_path = app_dir / "../APPDB/hr_database.db"
 
 knowledge_dir = app_dir / "knowledge_docs"
 temp_dir = app_dir / "temp_uploads"

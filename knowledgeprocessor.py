@@ -10,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 # --- 1. SETUP PATH & DATABASE (Sinkron dengan textprocessor.py) ---
 app_dir = Path(__file__).resolve().parent
-db_path = (app_dir / "../chroma_db").resolve()
+db_path = (app_dir / "../APPDB/chroma_db").resolve()
 config_path = app_dir / "config.json"
 
 # Menggunakan model embedding yang sama agar vektornya kompatibel

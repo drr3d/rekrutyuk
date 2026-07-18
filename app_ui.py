@@ -23,7 +23,7 @@ st.markdown("<style>.stChatMessage { padding-bottom: 20px; }</style>", unsafe_al
 st.title("🤖 HR Talent Acquisition Workspace")
 
 app_dir = Path(__file__).resolve().parent
-sqlite_db_path = app_dir / "hr_database.db"
+sqlite_db_path = app_dir / "../APPDB/hr_database.db"
 
 # [NEW UPGRADE]: Folder untuk menyimpan dokumen fisik HR Knowledge
 knowledge_dir = app_dir / "knowledge_docs"

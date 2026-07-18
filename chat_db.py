@@ -4,7 +4,7 @@ from pathlib import Path
 
 # Konfigurasi Path Database
 app_dir = Path(__file__).resolve().parent
-sqlite_db_path = app_dir / "hr_database.db"
+sqlite_db_path = app_dir / "../APPDB/hr_database.db"
 
 def init_chat_db():
     """Membuat tabel riwayat chat jika belum ada."""

@@ -15,12 +15,12 @@ from langchain_core.output_parsers import JsonOutputParser
 
 # --- 1. SETUP PATH & DATABASE ---
 app_dir = Path(__file__).resolve().parent
-db_path = (app_dir / "../chroma_db").resolve()
+db_path = (app_dir / "../APPDB/chroma_db").resolve()
 json_path = app_dir / "kandidat_profil.json"
 config_path = app_dir / "config.json"
 
 # --- KONFIGURASI PATH DATABASE SQLITE ---
-sqlite_db_path = app_dir / "hr_database.db"
+sqlite_db_path = app_dir / "../APPDB/hr_database.db"
 
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 vector_db = Chroma(persist_directory=str(db_path), embedding_function=embeddings)
