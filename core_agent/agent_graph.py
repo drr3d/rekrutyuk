@@ -8,13 +8,14 @@ from langgraph.graph import StateGraph, START, END
 #from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from agent_nodes import (
+from .agent_nodes import (
     AgentState,
     panggil_otak_llm,
     eksekutor_safe,
     eksekutor_sensitive,
     router_keputusan
 )
+from .agent_tools import sqlite_db_path
 
 # ==========================================
 # 1. UI REGISTRY (Agar Kontributor Bisa Menambah Custom View Tool)
@@ -64,7 +65,7 @@ class HRAgentEngine:
         
         # === OPSI A: MENGAKTIFKAN PERSISTENT CHECKPOINTER VIA SQLITE ===
         # Gunakan check_same_thread=False agar tidak bentrok saat diakses multi-thread oleh Streamlit
-        self.db_conn = sqlite3.connect("hr_database.db", check_same_thread=False)
+        self.db_conn = sqlite3.connect(sqlite_db_path, check_same_thread=False)
         self.memory = SqliteSaver(self.db_conn)
         # ===============================================================
         

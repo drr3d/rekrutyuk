@@ -1,0 +1,29 @@
+{
+  "environment": "corporate",
+  
+  "query_limits": {
+    "max_group_by_results": 10,
+    "query_timeout_seconds": 5,
+    "enable_fuzzy_matching": true
+  },
+  
+  "data_integrity": {
+    "exclude_nulls_in_aggregation": true,
+    "handle_outliers": {
+      "min_valid_age": 17,
+      "max_valid_age": 60
+    },
+    "deduplicate_by": ["nama_kandidat", "usia", "email"]
+  },
+  
+  "nlp_to_sql_features": {
+    "allow_negation": true,
+    "allow_range_queries": true,
+    "allow_cross_column_filters": true
+  },
+  
+  "security": {
+    "mask_pii_for_staff": true,
+    "enforce_branch_isolation": false
+  }
+}

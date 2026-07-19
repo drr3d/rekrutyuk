@@ -6,12 +6,12 @@ import os
 from datetime import datetime
 
 # --- IMPORT MODUL KUSTOM ---
-from agent_graph import proses_chat_agent 
-from chat_db import init_chat_db, load_chat_history, save_chat_message, clear_chat_history
+from core_agent.agent_graph import proses_chat_agent
+from database.chat_db import init_chat_db, load_chat_history, save_chat_message, clear_chat_history
 
 # [NEW UPGRADE]: Import fungsi dari knowledge_processor yang baru kita buat sebelumnya
 try:
-    from knowledgeprocessor import process_hr_knowledge, knowledge_db
+    from database.knowledgeprocessor import process_hr_knowledge, knowledge_db
     KNOWLEDGE_PROCESSOR_AVAILABLE = True
 except ImportError:
     KNOWLEDGE_PROCESSOR_AVAILABLE = False
@@ -22,8 +22,9 @@ st.set_page_config(page_title="HR Talent AI", page_icon="🤖", layout="wide")
 st.markdown("<style>.stChatMessage { padding-bottom: 20px; }</style>", unsafe_allow_html=True)
 st.title("🤖 HR Talent Acquisition Workspace")
 
-app_dir = Path(__file__).resolve().parent
-sqlite_db_path = app_dir / "../APPDB/hr_database.db"
+app_dir = Path(__file__).resolve().parent.parent
+
+sqlite_db_path = app_dir / "APPDB/hr_database.db"
 
 # [NEW UPGRADE]: Folder untuk menyimpan dokumen fisik HR Knowledge
 knowledge_dir = app_dir / "knowledge_docs"

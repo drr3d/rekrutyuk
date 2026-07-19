@@ -5,7 +5,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Annotated, TypedDict
 import sqlite3
-
+import importlib
+import pkgutil
 
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from langchain_chroma import Chroma
@@ -14,17 +15,33 @@ from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 
 # --- TAMBAHKAN IMPORT INI ---
-from freeform_calculation import calculate_age_from_entry_year
-from knowledgeprocessor import generate_interview_questions, process_hr_knowledge
+from tools.freeform_calculation import calculate_age_from_entry_year
+from database.knowledgeprocessor import generate_interview_questions, process_hr_knowledge
 
+class ToolRegistry:
+    """Registry agar kontributor bisa inject tools dari luar tanpa merubah file ini."""
+    safe_tools = []
+    sensitive_tools = []
+
+    @classmethod
+    def register(cls, is_sensitive=False):
+        def decorator(func):
+            # Ubah fungsi python biasa menjadi Langchain @tool
+            langchain_tool = tool(func)
+            if is_sensitive:
+                cls.sensitive_tools.append(langchain_tool)
+            else:
+                cls.safe_tools.append(langchain_tool)
+            return langchain_tool
+        return decorator
 
 # --- KONFIGURASI DATABASE & LLM ---
-app_dir = Path(__file__).resolve().parent
-db_path = (app_dir / "../APPDB/chroma_db").resolve()
-json_path = app_dir / "kandidat_profil.json"
-config_path = app_dir / "config.json"
-sqlite_db_path = app_dir / "../APPDB/hr_database.db"
+app_dir = Path(__file__).resolve().parent.parent
 
+db_path = (app_dir / "APPDB/chroma_db").resolve()
+json_path = app_dir / "kandidat_profil.json" # considered to be remove
+config_path = app_dir / "config.json"
+sqlite_db_path = app_dir / "APPDB/hr_database.db"
 knowledge_dir = app_dir / "knowledge_docs"
 temp_dir = app_dir / "temp_uploads"
 
@@ -95,13 +112,6 @@ def init_lowongan_db():
 
 init_lowongan_db()
 
-def dict_factory(cursor, row):
-    """Helper untuk mengubah hasil query SQLite menjadi dictionary (mirip struktur JSON)."""
-    d = {}
-    for idx, col in enumerate(cursor.description):
-        d[col[0]] = row[idx]
-    return d
-
 # --- FUNGSI BACA CONFIG ---
 analytics_config_path = app_dir / "analytics_config.json"
 
@@ -125,7 +135,7 @@ def get_analytics_config():
     return default_config
 
 # --- 2. DEFINISI TOOLS (KEMAMPUAN AGENT) ---
-@tool
+@ToolRegistry.register(is_sensitive=False)
 def simpan_dokumen_ke_knowledge(nama_file: str, start_page: int = 1) -> str:
     """
     Tools untuk memproses dokumen PDF panduan HR yang diunggah lewat chat.
@@ -168,7 +178,7 @@ def simpan_dokumen_ke_knowledge(nama_file: str, start_page: int = 1) -> str:
     except Exception as e:
         return f"Gagal: Terjadi error internal saat sistem memindahkan file -> {str(e)}"
 
-@tool
+@ToolRegistry.register(is_sensitive=False)
 def pencarian_web_umum(query: str) -> str:
     """
     GUNAKAN ALAT INI UNTUK MENCARI INFORMASI APAPUN DI INTERNET.
@@ -193,7 +203,7 @@ def pencarian_web_umum(query: str) -> str:
     except Exception as e:
         return f"Gagal mencari di web: {e}"
 
-@tool
+@ToolRegistry.register(is_sensitive=False)
 def cari_info_perusahaan_di_web(nama_perusahaan: str) -> str:
     """
     GUNAKAN ALAT INI UNTUK MENCARI LATAR BELAKANG, PROFIL, ATAU REPUTASI SEBUAH PERUSAHAAN DI INTERNET.
@@ -218,7 +228,7 @@ def cari_info_perusahaan_di_web(nama_perusahaan: str) -> str:
     except Exception as e:
         return f"Gagal mencari di web: {e}"
 
-@tool
+@ToolRegistry.register(is_sensitive=False)
 def cari_detail_kualitatif_cv(query: str) -> str:
     """
     GUNAKAN ALAT INI UNTUK MENCARI ISI TEKS RESUME SECARA MENDALAM.
@@ -231,7 +241,7 @@ def cari_detail_kualitatif_cv(query: str) -> str:
     hasil = "\n\n".join(f"[Sumber: {doc.metadata.get('source')}]:\n{doc.page_content}" for doc in docs)
     return hasil
 
-@tool
+@ToolRegistry.register(is_sensitive=True)
 def kirim_pesan_kandidat(nama_kandidat: str, pesan: str) -> str:
     """
     GUNAKAN ALAT INI UNTUK MENGIRIM PESAN ATAU EMAIL KE KANDIDAT.
@@ -239,16 +249,18 @@ def kirim_pesan_kandidat(nama_kandidat: str, pesan: str) -> str:
     """
     print(f"-> [SISTEM MENGIRIM PESAN] Ke: {nama_kandidat} | Isi: {pesan}")
     return f"Pesan berhasil dikirim ke {nama_kandidat}."
-# ==========================================
-# --- 1. PISAHKAN KATEGORI TOOLS ---
-# ==========================================
-# ambil_tautan_download_cv dipindah ke safe_tools sesuai kesepakatan sebelumnya
-safe_tools = [
-    cari_detail_kualitatif_cv, 
-    cari_info_perusahaan_di_web,
-    pencarian_web_umum,
-]
 
-sensitive_tools = [kirim_pesan_kandidat]
+# --- AUTO-DISCOVERY PLUGIN ---
+# Sistem akan membaca otomatis semua file python di folder 'plugins'
+# Memanfaatkan app_dir yang sudah dideklarasikan di atas
+plugin_folder = app_dir / "plugins"
 
+if plugin_folder.exists():
+    # pkgutil.iter_modules membutuhkan list of string path
+    for _, module_name, _ in pkgutil.iter_modules([str(plugin_folder)]):
+        importlib.import_module(f"plugins.{module_name}")
+
+# Kumpulkan tools untuk diexport ke agent_nodes.py
+safe_tools = ToolRegistry.safe_tools
+sensitive_tools = ToolRegistry.sensitive_tools
 tools = safe_tools + sensitive_tools
