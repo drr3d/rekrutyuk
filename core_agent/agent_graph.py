@@ -17,6 +17,7 @@ from .agent_nodes import (
 )
 from .agent_tools import sqlite_db_path
 
+
 # ==========================================
 # 1. UI REGISTRY (Agar Kontributor Bisa Menambah Custom View Tool)
 # ==========================================
@@ -129,6 +130,7 @@ class HRAgentEngine:
                 self.executor.invoke({"messages": [HumanMessage(content=user_input)]}, config=config)
             
         return self.executor.get_state(config)
+
 # ==========================================
 # 3. UI ADAPTER (Penterjemah State Mentah Graf -> Kebutuhan Frontend)
 # ==========================================

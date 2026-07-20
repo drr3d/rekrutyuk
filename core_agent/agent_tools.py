@@ -1,49 +1,20 @@
-import os
 import json
 import shutil
-from pathlib import Path
+
 from datetime import datetime
-from typing import Annotated, TypedDict
 import sqlite3
 import importlib
 import pkgutil
 
-from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings, ChatOllama
-from langchain_core.tools import tool
-from langchain_core.runnables import RunnableConfig
 
 # --- TAMBAHKAN IMPORT INI ---
-from tools.freeform_calculation import calculate_age_from_entry_year
-from database.knowledgeprocessor import generate_interview_questions, process_hr_knowledge
-
-class ToolRegistry:
-    """Registry agar kontributor bisa inject tools dari luar tanpa merubah file ini."""
-    safe_tools = []
-    sensitive_tools = []
-
-    @classmethod
-    def register(cls, is_sensitive=False):
-        def decorator(func):
-            # Ubah fungsi python biasa menjadi Langchain @tool
-            langchain_tool = tool(func)
-            if is_sensitive:
-                cls.sensitive_tools.append(langchain_tool)
-            else:
-                cls.safe_tools.append(langchain_tool)
-            return langchain_tool
-        return decorator
-
-# --- KONFIGURASI DATABASE & LLM ---
-app_dir = Path(__file__).resolve().parent.parent
-
-db_path = (app_dir / "APPDB/chroma_db").resolve()
-json_path = app_dir / "kandidat_profil.json" # considered to be remove
-config_path = app_dir / "config.json"
-sqlite_db_path = app_dir / "APPDB/hr_database.db"
-knowledge_dir = app_dir / "knowledge_docs"
-temp_dir = app_dir / "temp_uploads"
+#from tools.freeform_calculation import calculate_age_from_entry_year
+from database.knowledgeprocessor import process_hr_knowledge
+#from tools.dict_factory import dict_factory
+from .config import app_dir, config_path, db_path, sqlite_db_path, temp_dir, knowledge_dir
+from .registry import ToolRegistry
 
 # --- [DYNAMIC CONFIG] MEMBACA SETTING MODEL UNTUK CHAT AGENT ---
 model_chat_name = "qwen2.5:1.5b" # Default fallback jika config tidak ada
@@ -177,69 +148,6 @@ def simpan_dokumen_ke_knowledge(nama_file: str, start_page: int = 1) -> str:
             
     except Exception as e:
         return f"Gagal: Terjadi error internal saat sistem memindahkan file -> {str(e)}"
-
-@ToolRegistry.register(is_sensitive=False)
-def pencarian_web_umum(query: str) -> str:
-    """
-    GUNAKAN ALAT INI UNTUK MENCARI INFORMASI APAPUN DI INTERNET.
-    Gunakan jika user menanyakan info umum, profil perusahaan, standar gaji, regulasi, 
-    atau data yang tidak ada di dalam database internal kandidat.
-    """
-    print(f"-> [Web Search] Mencari di internet: {query}...")
-    try:
-        # Melakukan pencarian ke internet (Otomatis bebas HTML)
-        search = DuckDuckGoSearchAPIWrapper(max_results=3)
-        hasil_web = search.run(query) 
-        
-        # Simpan hasil riset ini ke ChromaDB agar jadi ingatan permanen (General Knowledge)
-        teks_memori = f"Informasi Web (Hasil pencarian untuk '{query}'):\n{hasil_web}"
-        vector_db.add_texts(
-            texts=[teks_memori],
-            metadatas=[{"source": "web_search", "type": "general_knowledge", "query": query}]
-        )
-        print(f"-> [Memory] Info '{query}' berhasil disimpan ke Vector Database.")
-        
-        return f"Berikut adalah data dari internet: {hasil_web}"
-    except Exception as e:
-        return f"Gagal mencari di web: {e}"
-
-@ToolRegistry.register(is_sensitive=False)
-def cari_info_perusahaan_di_web(nama_perusahaan: str) -> str:
-    """
-    GUNAKAN ALAT INI UNTUK MENCARI LATAR BELAKANG, PROFIL, ATAU REPUTASI SEBUAH PERUSAHAAN DI INTERNET.
-    Hanya gunakan jika HR bertanya spesifik tentang perusahaan tempat kandidat bekerja.
-    """
-    print(f"-> [Web Search] Mencari info tentang perusahaan: {nama_perusahaan}...")
-    try:
-
-        # Melakukan pencarian ke internet
-        search = DuckDuckGoSearchAPIWrapper(max_results=3)
-        hasil_web = search.run(f"profil perusahaan {nama_perusahaan} bergerak di bidang apa")
-        
-        # [KUNCI RAHASIA]: Simpan hasil riset ini ke ChromaDB agar jadi ingatan permanen!
-        teks_memori = f"Informasi Latar Belakang Perusahaan {nama_perusahaan}:\n{hasil_web}"
-        vector_db.add_texts(
-            texts=[teks_memori],
-            metadatas=[{"source": "web_search", "type": "company_info", "company": nama_perusahaan}]
-        )
-        print(f"-> [Memory] Info {nama_perusahaan} berhasil disimpan ke database.")
-        
-        return f"Hasil riset web: {hasil_web}"
-    except Exception as e:
-        return f"Gagal mencari di web: {e}"
-
-@ToolRegistry.register(is_sensitive=False)
-def cari_detail_kualitatif_cv(query: str) -> str:
-    """
-    GUNAKAN ALAT INI UNTUK MENCARI ISI TEKS RESUME SECARA MENDALAM.
-    Jika kamu ingin mencari detail spesifik seseorang, pastikan kamu memasukkan nama kandidat ke dalam query ini (contoh: 'Pengalaman kerja Aulia Normansyah').
-    """
-    docs = retriever.invoke(query)
-    if not docs:
-        return "Tidak ditemukan informasi mendetail di dalam dokumen CV."
-    
-    hasil = "\n\n".join(f"[Sumber: {doc.metadata.get('source')}]:\n{doc.page_content}" for doc in docs)
-    return hasil
 
 @ToolRegistry.register(is_sensitive=True)
 def kirim_pesan_kandidat(nama_kandidat: str, pesan: str) -> str:

@@ -2,7 +2,7 @@ import operator
 from typing import Annotated, TypedDict
 
 # Import LangChain & LangGraph components
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
@@ -98,11 +98,6 @@ def panggil_otak_llm(state: AgentState):
     
     return {"messages": [response]}
 
-# NODE 3 & 4: Tangan Eksekutor Tool
-eksekutor_safe = ToolNode(safe_tools)
-eksekutor_sensitive = ToolNode(sensitive_tools)
-
-
 # ==========================================
 # --- 3. DEFINISI ROUTER (PENGATUR JALUR) ---
 # ==========================================
@@ -129,21 +124,6 @@ def router_keputusan(state: AgentState) -> str:
     print("[Log Sistem] Draf selesai. Langsung kirim jawaban ke User!")
     return "langsung_selesai"
 
-
-def router_setelah_evaluasi(state: AgentState) -> str:
-    """Router dari QC: Lulus (selesai) atau Gagal (revisi lagi)?"""
-    pesan_terakhir = state["messages"][-1].content
-    jumlah_revisi = state.get("revision_count", 0)
-    
-    print(f"[Log Sistem] Mengecek hasil QC (Revisi ke-{jumlah_revisi})...")
-    
-    if jumlah_revisi >= 2:
-        print("[Log Sistem] ⚠️ Batas maksimal revisi tercapai. Memaksa selesai.")
-        return "selesai"
-        
-    if "STATUS: LULUS" in pesan_terakhir.upper():
-        print("[Log Sistem] ✅ QC Lulus! Menyiapkan jawaban final.")
-        return "selesai"
-    else:
-        print("[Log Sistem] ❌ QC Gagal. Mengembalikan draf ke AI Utama untuk diperbaiki.")
-        return "revisi"
+# NODE 3 & 4: Tangan Eksekutor Tool
+eksekutor_safe = ToolNode(safe_tools)
+eksekutor_sensitive = ToolNode(sensitive_tools)
