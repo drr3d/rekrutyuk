@@ -9,9 +9,10 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 # KEMBALI KE OLLAMA EMBEDDINGS (Tanpa HuggingFace Transformers)
 from langchain_ollama import OllamaEmbeddings, ChatOllama
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
+#from langchain_core.output_parsers import JsonOutputParser
 
 # --- 1. SETUP PATH & DATABASE ---
 app_dir = Path(__file__).resolve().parent
@@ -21,6 +22,15 @@ config_path = app_dir / "config.json"
 
 # --- KONFIGURASI PATH DATABASE SQLITE ---
 sqlite_db_path = app_dir / "../APPDB/hr_database.db"
+
+# Model lain embedding untuk di test:
+#bge-m3 -Sangat kuat multilingual + retrieval
+#bge-large-en-v1.5 - Akurasi tinggi English
+#e5-large-v2 - stabil untuk query-document
+#gte-large - Bagus untuk semantic search umum
+bge = HuggingFaceEmbeddings(
+    model_name="BAAI/bge-m3"
+)
 
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 vector_db = Chroma(persist_directory=str(db_path), embedding_function=embeddings)

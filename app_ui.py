@@ -2,12 +2,12 @@ import streamlit as st
 import uuid
 
 # --- IMPORT MODUL KUSTOM ---
-
 from database.chat_db import init_chat_db, load_chat_history
 from database.knowledge_db import init_knowledge_db
+from database.interview_db import init_interview_db
 from core_agent.config import sqlite_db_path, app_dir
 
-from views import tab4_lowongan, tab3_hrknowledge, tab2_cvkandidat, tab1_aichat
+from views import tab5_interview, tab4_lowongan, tab3_hrknowledge, tab2_cvkandidat, tab1_aichat
 
 # --- KONFIGURASI HALAMAN ---
 st.set_page_config(page_title="HR Talent AI", page_icon="🤖", layout="wide")
@@ -77,6 +77,7 @@ st.sidebar.info(f"Aktif sebagai: **{st.session_state.user_role}** ({st.session_s
 # ==========================================
 init_chat_db() # Pastikan tabel DB sudah ada
 init_knowledge_db()
+init_interview_db()
 
 # 1. Manajemen Daftar Thread (Sesi)
 if "daftar_thread" not in st.session_state:
@@ -141,7 +142,13 @@ if "data_approval" not in st.session_state:
 # --- LAYOUTING TABS ---
 # ==========================================
 # [NEW UPGRADE]: Menambahkan Tab 3 untuk Knowledge Base
-tab1, tab2, tab3, tab4 = st.tabs(["💬 AI Assistant", "🗂️ Database Kandidat", "📚 HR Knowledge Base", "📢 Lowongan & Screening"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "💬 AI Assistant", 
+    "🗂️ Database Kandidat", 
+    "📚 HR Knowledge Base", 
+    "📢 Lowongan & Screening",
+    "📅 Jadwal Interview"  # <-- Tambahkan pintu masuk Tab 5 di sini
+])
 
 with tab1:
     tab1_aichat.render(temp_dir)
@@ -154,3 +161,6 @@ with tab3:
 
 with tab4:
     tab4_lowongan.render(sqlite_db_path)
+
+with tab5:
+    tab5_interview.render(sqlite_db_path)
