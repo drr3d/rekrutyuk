@@ -1,9 +1,12 @@
 import os
-import json
-import re
+import numpy as np
+import json, re, pickle
 from pathlib import Path
 from datetime import datetime
 import sqlite3
+
+import sys
+from pathlib import Path
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -12,28 +15,56 @@ from langchain_ollama import OllamaEmbeddings, ChatOllama
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.prompts import ChatPromptTemplate
-#from langchain_core.output_parsers import JsonOutputParser
 
-# --- 1. SETUP PATH & DATABASE ---
-app_dir = Path(__file__).resolve().parent
-db_path = (app_dir / "../APPDB/chroma_db").resolve()
-json_path = app_dir / "kandidat_profil.json"
-config_path = app_dir / "config.json"
+# 1. Dapatkan path dari root folder proyek (naik 1 tingkat dari folder 'tools')
+root_dir = Path(__file__).resolve().parent.parent
 
-# --- KONFIGURASI PATH DATABASE SQLITE ---
-sqlite_db_path = app_dir / "../APPDB/hr_database.db"
+# 2. Masukkan root folder ke sistem path Python jika belum terdaftar
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
 
-# Model lain embedding untuk di test:
-#bge-m3 -Sangat kuat multilingual + retrieval
-#bge-large-en-v1.5 - Akurasi tinggi English
-#e5-large-v2 - stabil untuk query-document
-#gte-large - Bagus untuk semantic search umum
-bge = HuggingFaceEmbeddings(
-    model_name="BAAI/bge-m3"
-)
+# Sesuaikan dengan path database Anda
+from core_agent.config import db_path, config_path, sqlite_db_path
 
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
-vector_db = Chroma(persist_directory=str(db_path), embedding_function=embeddings)
+
+bge = HuggingFaceEmbeddings(
+    model_name="BAAI/bge-m3",
+    encode_kwargs={'normalize_embeddings': True}
+)
+
+# =====================================================================
+# [OPTIMASI 1, 2, & 4]: MATRYOSHKA EMBEDDINGS DITARUH DI HULU (SINI)
+# =====================================================================
+class OptimizedCPUEmbeddings(HuggingFaceEmbeddings):
+    target_dimensions: int = 256 # Pangkas dimensi agar enteng di RAM/CPU
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        prefixed_texts = [f"search_document: {t}" for t in texts]
+        embs = super().embed_documents(prefixed_texts)
+        return self._truncate_and_normalize(embs)
+        
+    def embed_query(self, text: str) -> list[float]:
+        prefixed_text = f"search_query: {text}"
+        emb = super().embed_query(prefixed_text)
+        return self._truncate_and_normalize([emb])[0]
+        
+    def _truncate_and_normalize(self, embeddings: list[list[float]]) -> list[list[float]]:
+        arr = np.array(embeddings)[:, :self.target_dimensions]
+        norms = np.linalg.norm(arr, axis=1, keepdims=True)
+        normalized = np.divide(arr, norms, out=np.zeros_like(arr), where=norms!=0)
+        return normalized.tolist()
+
+# Gunakan Class Optimized yang baru dibuat
+bge_xmatroyshka = OptimizedCPUEmbeddings(
+    model_name="BAAI/bge-m3",
+    model_kwargs={'device': 'cpu'},
+    encode_kwargs={'normalize_embeddings': False} # Normalisasi sudah dihandle class
+)
+
+vector_db = Chroma(persist_directory=str(db_path), 
+                   embedding_function=bge_xmatroyshka,
+                   collection_metadata={"hnsw:space": "cosine"})
 
 # --- 2. PROMPT EXTRACTION ---
 # Kita gunakan "riwayat_periode_kerja" agar AI tidak bingung.
@@ -43,7 +74,28 @@ extraction_prompt = ChatPromptTemplate.from_messages([
     ("system", 
      "Kamu adalah Senior HR Data Extractor. Tugasmu mengekstrak informasi dari teks CV "
      "(CV bisa berbahasa Indonesia atau English) ke dalam format JSON yang presisi.\n\n"
-    
+     "ATURAN MUTLAK:\n"
+     "1. Keluarkan HANYA output JSON yang valid. Tidak boleh ada teks pembuka, penjelasan, atau penutup.\n"
+     "2. JANGAN gunakan markdown code blocks (seperti ```json). Langsung mulai dengan karakter {{\n"
+     "   dan akhiri dengan }}.\n"
+     "3. Ekstrak 'pekerjaan_aktif_saat_ini' berisi NAMA PERUSAHAAN yang periode kerjanya masih 'Now', 'Current', atau 'Present'. Kosongkan array jika tidak ada.\n"
+     "4. Isi 'status_kalkulasi' dengan 'Kotor' jika ada pekerjaan yang masih aktif. Isi 'Bersih' jika semua pekerjaan memiliki tahun selesai yang pasti.\n"
+     "5. WAJIB ikuti format JSON berikut tanpa mengubah key:\n"
+     "{{\n"
+     "  \"nama_kandidat\": \"Nama Lengkap\",\n"
+     "  \"nik\": \"Nomor NIK/KTP (Ambil semua angkanya, abaikan titik/strip)\",\n"
+     "  \"email\": \"contoh@email.com\",\n"
+     "  \"no_hp\": \"08xxxxxxxx\",\n"
+     "  \"gender\": \"Pria/Wanita/Tidak Diketahui\",\n"
+     "  \"usia\": 0,\n"
+     "  \"asal_daerah\": \"Nama Kota Domisili\",\n"
+     "  \"pekerjaan_aktif_saat_ini\": [\"Nama Perusahaan 1\"],\n"
+     "  \"status_kalkulasi\": \"Kotor/Bersih\",\n"
+     "  \"riwayat_periode_kerja\": [\"August 2013 to Current\", \"October 2010 to March 2013\"],\n"
+     "  \"pendidikan_terakhir\": \"SMA/D3/S1/S2/S3\",\n"
+     "  \"jurusan\": \"Nama Jurusan\",\n"
+     "  \"ipk\": 0.0,\n"
+     "  \"skill_utama\": [\"Skill1\", \"Skill2\"]\n"
      "}}\n"
      "PENTING: Jangan mengarang informasi. Jika data tidak ditemukan, gunakan string kosong \"\" untuk teks, angka 0 untuk nominal, atau array kosong []."
     ),
@@ -87,7 +139,14 @@ def auto_screening_cv(profil_kandidat: dict, model_name: str) -> tuple[str, str]
             ("system", 
              "Kamu adalah AI Senior HR Screener otomatis yang bekerja di balik layar.\n"
              "Tugasmu: Evaluasi kecocokan data JSON kandidat terhadap kriteria lowongan aktif.\n\n"
-             
+             "ATURAN MUTLAK KELUARAN:\n"
+             "1. Keluarkan HANYA format JSON valid. Tidak ada teks pengantar.\n"
+             "2. Gunakan key 'status_screening' (Isi eksklusif dengan: MATCH, CAUTION, atau REJECT).\n"
+             "3. Gunakan key 'alasan_screening' (Berikan 2-3 kalimat penjelasan analitis, bandingkan skill CV dengan keyword lowongan).\n\n"
+             "KRITERIA PENILAIAN:\n"
+             "- MATCH: Skill teknis & pengalaman >= 80% sesuai keyword lowongan.\n"
+             "- CAUTION: Relevansi 50-79%, ATAU kandidat memiliki gap/latar belakang unik yang butuh validasi human (HR).\n"
+             "- REJECT: Relevansi < 50%, ATAU tidak memenuhi kualifikasi dasar sama sekali."
             ),
             ("human", 
              f"Posisi Lowongan: {posisi_lowongan}\n"
@@ -289,6 +348,7 @@ def update_database_catalog(filename: str, text_cv: str, model_name: str, recrea
         print(f"-> [AI Extractor] Gagal mengekstrak/menyimpan profil ke database: {e}")
 
 # --- 3. FUNGSI UTAMA PEMROSESAN ---
+'''
 def process_cv(file_path):
     filename = os.path.basename(file_path)
     print(f"\n=== Memproses file: {filename} ===")
@@ -303,7 +363,7 @@ def process_cv(file_path):
         if jumlah_halaman > 5:
             print(f"❌ [DITOLAK] File {filename} memiliki {jumlah_halaman} halaman (Maksimal 5).")
             print("=== Selesai (Dibatalkan) ===\n")
-            return 
+            return False
             
         print(f"-> [Validasi Lolos] CV terdiri dari {jumlah_halaman} halaman.")
         
@@ -360,3 +420,118 @@ def process_cv(file_path):
     vector_db.add_documents(chunks, ids=ids)
     print(f"-> [ChromaDB] Berhasil menyimpan {len(chunks)} chunk teks untuk {filename}!")
     print("=== Selesai ===\n")
+    return True
+'''
+def process_cv(file_path):
+    # Mengambil nama file dari path lengkap (contoh: dari "C:/folder/cv_staff.pdf" jadi "cv_staff.pdf")
+    filename = os.path.basename(file_path)
+    print(f"\n=== Memproses file: {filename} ===")
+    
+    # =====================================================================
+    # FASE 1: MEMBACA DAN MEMVALIDASI FILE PDF
+    # =====================================================================
+    try:
+        # Membaca isi PDF menggunakan alat pembaca dari Langchain
+        loader = PyPDFLoader(file_path)
+        documents = loader.load()
+        
+        # Menghitung ada berapa lembar halaman di dalam CV tersebut
+        jumlah_halaman = len(documents)
+        
+        # Jika CV lebih dari 5 halaman, tolak! Ini agar sistem tidak hang/lemot 
+        # membaca dokumen pelamar yang terlalu panjang.
+        if jumlah_halaman > 5:
+            print(f"❌ [DITOLAK] File {filename} memiliki {jumlah_halaman} halaman (Maksimal 5).")
+            return False
+            
+        print(f"-> [Validasi Lolos] CV terdiri dari {jumlah_halaman} halaman.")
+        
+    except PermissionError as e:
+        # Jika file sedang dibuka oleh program lain (dikunci Windows), lemparkan errornya
+        # ke atas agar file pengawas (watchdog) bisa mencoba memprosesnya lagi nanti.
+        raise e
+    except Exception as e:
+        # Jika PDF rusak atau korup, hentikan proses di sini
+        print(f"❌ [ERROR] Gagal membaca PDF {filename}: {e}")
+        return
+    
+    # =====================================================================
+    # FASE 2: MEMPERSIAPKAN OTAK AI UNTUK EKSTRAKSI JSON
+    # =====================================================================
+    model_extractor_name = "qwen3.5:4b" # Model cadangan jika settingan gagal dibaca
+    
+    # Membaca model apa yang disetel oleh HR di file konfigurasi (analytics_config.json)
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+                model_extractor_name = config_data.get("model_extractor", "qwen3.5:4b")
+        except Exception:
+            pass
+            
+    # Mencegah duplikasi data: Jika file dengan nama yang sama pernah diproses sebelumnya,
+    # hapus dulu ingatan lama di VectorDB agar tidak double/bertabrakan saat ditimpa yang baru.
+    try:
+        vector_db.delete(where={"source": filename})
+    except Exception:
+        pass 
+    
+    # =====================================================================
+    # FASE 3: JALUR TERSTRUKTUR (MASUK KE SQLITE)
+    # =====================================================================
+    # Menggabungkan semua halaman teks menjadi satu string panjang
+    full_text = "\n".join(doc.page_content for doc in documents)
+    
+    # [OPTIMASI KOMPRESI]: Menghapus semua enter/garis baru dan spasi berlebih.
+    # Tujuannya agar token yang dikirim ke AI lebih sedikit (menghemat RAM VGA/CPU).
+    teks_untuk_json = re.sub(r'\s+', ' ', full_text).strip()
+    
+    # Mengirim teks yang sudah dikompresi ke fungsi 'update_database_catalog'.
+    # Fungsi ini akan menyuruh AI mengubah teks jadi JSON (Nama, Umur, Skill) lalu menyimpannya ke tabel SQLite.
+    update_database_catalog(filename, teks_untuk_json, model_extractor_name, False)
+    
+    # =====================================================================
+    # FASE 4: JALUR TAK TERSTRUKTUR (MASUK KE VECTOR & BM25 UNTUK RAG)
+    # =====================================================================
+    # Memotong-motong dokumen penuh menjadi bagian-bagian kecil (chunk) sebesar 1000 karakter.
+    # Ada 'overlap' 200 karakter agar kalimat yang terpotong di ujung tidak kehilangan konteks.
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = text_splitter.split_documents(documents)
+    
+    ids = []
+    for i, chunk in enumerate(chunks):
+        # Memberikan identitas (metadata) pada setiap potongan teks agar tahu teks ini asalnya dari CV siapa
+        chunk.metadata["source"] = filename
+        chunk.metadata["type"] = "resume"
+        # Membuat ID unik (contoh: "cv_user.pdf_0", "cv_staff.pdf_1")
+        ids.append(f"{filename}_{i}")
+    
+    # 1. Simpan potongan teks ini ke dalam ChromaDB (Berbasis Makna/Vektor)
+    vector_db.add_documents(chunks, ids=ids)
+    print(f"-> [ChromaDB] Berhasil menyimpan {len(chunks)} chunk teks untuk {filename}!")
+    
+    # 2. Simpan potongan teks ini ke dalam Corpus BM25 (Berbasis Kata Kunci Eksak)
+    bm25_corpus_path = Path(str(db_path)) / "bm25_corpus.pkl"
+    try:
+        corpus_docs = []
+        # Jika file kumpulan kata kunci (pickle) sudah ada sebelumnya, buka dan baca dulu isinya
+        if bm25_corpus_path.exists():
+            with open(bm25_corpus_path, "rb") as f:
+                corpus_docs = pickle.load(f)
+                
+        # Hapus potongan teks lama milik pelamar ini (jika ada) supaya data update CV tidak terhitung ganda
+        corpus_docs = [doc for doc in corpus_docs if doc.metadata.get("source") != filename]
+        
+        # Tambahkan potongan teks (chunk) dari CV yang baru diproses ini ke dalam tumpukan corpus
+        corpus_docs.extend(chunks)
+        
+        # Simpan/tutup kembali file pickle-nya
+        with open(bm25_corpus_path, "wb") as f:
+            pickle.dump(corpus_docs, f)
+        print(f"-> [BM25 Corpus] Berhasil memperbarui keyword indeks untuk Hybrid Search!")
+        
+    except Exception as e:
+        print(f"-> [Warning] Gagal memproses BM25 Corpus: {e}")
+
+    print("=== Selesai ===\n")
+    return True

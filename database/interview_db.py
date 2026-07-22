@@ -1,6 +1,4 @@
 import sqlite3
-import json
-from datetime import datetime, timedelta
 from core_agent.config import sqlite_db_path
 
 def init_interview_db():

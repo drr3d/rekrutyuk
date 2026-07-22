@@ -1,19 +1,20 @@
 import json
-import shutil
 
-from datetime import datetime
+import pickle # [TAMBAHAN] Untuk memuat BM25
+import numpy as np # [TAMBAHAN]
 import sqlite3
 import importlib
 import pkgutil
+from pathlib import Path
 
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings, ChatOllama
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.retrievers import BM25Retriever # [TAMBAHAN] Keyword RAG
+from langchain_classic.retrievers import EnsembleRetriever
 
 # --- TAMBAHKAN IMPORT INI ---
-#from tools.freeform_calculation import calculate_age_from_entry_year
-from database.knowledgeprocessor import process_hr_knowledge
-#from tools.dict_factory import dict_factory
-from .config import app_dir, config_path, db_path, sqlite_db_path, temp_dir, knowledge_dir
+from .config import app_dir, config_path, db_path, sqlite_db_path
 from .registry import ToolRegistry
 
 # --- [DYNAMIC CONFIG] MEMBACA SETTING MODEL UNTUK CHAT AGENT ---
@@ -27,15 +28,79 @@ if config_path.exists():
     except Exception:
         pass
 
-embeddings = OllamaEmbeddings(model="nomic-embed-text")
-vector_db = Chroma(persist_directory=str(db_path), embedding_function=embeddings)
+# =====================================================================
+# WAJIB IDENTIK DENGAN TEXTPROCESSOR AGAR DIMENSI VEKTOR COCOK (256)
+# =====================================================================
+class OptimizedCPUEmbeddings(HuggingFaceEmbeddings):
+    target_dimensions: int = 256
 
-# [PERBAIKAN KRUSIAL]: 'k' dinaikkan jadi 10 agar AI bisa membaca seluruh halaman CV
-retriever = vector_db.as_retriever(search_kwargs={"k": 10}) 
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        prefixed_texts = [f"search_document: {t}" for t in texts]
+        embs = super().embed_documents(prefixed_texts)
+        return self._truncate_and_normalize(embs)
+        
+    def embed_query(self, text: str) -> list[float]:
+        prefixed_text = f"search_query: {text}"
+        emb = super().embed_query(prefixed_text)
+        return self._truncate_and_normalize([emb])[0]
+        
+    def _truncate_and_normalize(self, embeddings: list[list[float]]) -> list[list[float]]:
+        arr = np.array(embeddings)[:, :self.target_dimensions]
+        norms = np.linalg.norm(arr, axis=1, keepdims=True)
+        normalized = np.divide(arr, norms, out=np.zeros_like(arr), where=norms!=0)
+        return normalized.tolist()
+
+ollamaembedding = False
+if ollamaembedding:
+    embeddings = OllamaEmbeddings(model="nomic-embed-text")
+    vector_db = Chroma(persist_directory=str(db_path), embedding_function=embeddings)
+
+    # [PERBAIKAN KRUSIAL]: 'k' dinaikkan jadi 10 agar AI bisa membaca seluruh halaman CV
+    retriever = vector_db.as_retriever(search_kwargs={"k": 10}) 
+else:
+    bge_xmatroyshka = OptimizedCPUEmbeddings(
+        model_name="BAAI/bge-m3",
+        model_kwargs={'device': 'cpu'},
+        encode_kwargs={'normalize_embeddings': False}
+    )
+
+    # Load VectorDB dengan Class yang identik
+    vector_db = Chroma(
+        persist_directory=str(db_path), 
+        embedding_function=bge_xmatroyshka,
+        collection_metadata={"hnsw:space": "cosine"}
+    )
 
 # LLM sebagai "Otak" Agent dinamis berdasarkan konfigurasi.
 # beberapa setting num_ctx: 4086, 8192, 12288, 16384
 llm = ChatOllama(model=model_chat_name, temperature=0.1, num_ctx=16384)
+
+# =====================================================================
+# [HYBRID RETRIEVER EXPORT] Gantikan `retriever` lama Anda dengan ini
+# =====================================================================
+def get_hybrid_retriever(top_k: int = 10):
+    chroma_retriever = vector_db.as_retriever(search_kwargs={"k": top_k})
+    
+    bm25_corpus_path = Path(str(db_path)) / "bm25_corpus.pkl"
+    bm25_retriever = None
+    
+    if bm25_corpus_path.exists():
+        try:
+            with open(bm25_corpus_path, "rb") as f:
+                corpus_docs = pickle.load(f)
+            if corpus_docs:
+                bm25_retriever = BM25Retriever.from_documents(corpus_docs)
+                bm25_retriever.k = top_k
+        except Exception as e:
+            print(f"[Warning] Gagal meload BM25: {e}")
+
+    # Gabungkan Makna (Vector) dan Kata Kunci (BM25)
+    if bm25_retriever:
+        return EnsembleRetriever(
+            retrievers=[chroma_retriever, bm25_retriever],
+            weights=[0.5, 0.5]
+        )
+    return chroma_retriever
 
 # inisialisasi tabel lowongan
 def init_lowongan_db():
@@ -104,59 +169,6 @@ def get_analytics_config():
         except Exception:
             pass
     return default_config
-
-# --- 2. DEFINISI TOOLS (KEMAMPUAN AGENT) ---
-@ToolRegistry.register(is_sensitive=False)
-def simpan_dokumen_ke_knowledge(nama_file: str, start_page: int = 1) -> str:
-    """
-    Tools untuk memproses dokumen PDF panduan HR yang diunggah lewat chat.
-    Tools ini mengambil file dari temp_uploads, memindahkannya ke knowledge_docs, 
-    dan memprosesnya ke Vector DB (ChromaDB) dan SQLite.
-    """
-    # 1. Validasi Ekstensi
-    if not nama_file.lower().endswith('.pdf'):
-        return "Gagal: Dokumen panduan HR mutlak harus berformat .pdf!"
-
-    file_asal = temp_dir / nama_file
-    file_tujuan = knowledge_dir / nama_file
-
-    # 2. Cek apakah file ada di Staging Area
-    if not file_asal.exists():
-        return f"Gagal: File fisik '{nama_file}' tidak ditemukan. Pastikan Anda sudah melampirkan file dengan benar di chat."
-
-    try:
-        # 3. Pindahkan file secara permanen ke folder knowledge
-        shutil.move(str(file_asal), str(file_tujuan))
-        
-        # 4. Ingest file ke ChromaDB via knowledgeprocessor
-        is_success = process_hr_knowledge(str(file_tujuan), start_page=start_page)
-        
-        if is_success:
-            # 5. Rekam ke SQLite dengan mode WAL agar muncul di UI Tab 3
-            with sqlite3.connect(sqlite_db_path, timeout=30.0) as conn:
-                cursor = conn.cursor()
-                cursor.execute("PRAGMA journal_mode=WAL;")
-                cursor.execute('''
-                    INSERT OR REPLACE INTO hr_knowledge (filename, upload_date, uploaded_by)
-                    VALUES (?, ?, ?)
-                ''', (nama_file, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "HR via Chat"))
-                conn.commit()
-                
-            return f"Sukses! Dokumen panduan '{nama_file}' berhasil dimasukkan ke Knowledge Base dan dipelajari AI."
-        else:
-            return "Gagal memproses dokumen ke Vector Database. File mungkin rusak atau start_page melebihi batas."
-            
-    except Exception as e:
-        return f"Gagal: Terjadi error internal saat sistem memindahkan file -> {str(e)}"
-
-@ToolRegistry.register(is_sensitive=True)
-def kirim_pesan_kandidat(nama_kandidat: str, pesan: str) -> str:
-    """
-    GUNAKAN ALAT INI UNTUK MENGIRIM PESAN ATAU EMAIL KE KANDIDAT.
-    Tool ini akan mengeksekusi pengiriman notifikasi eksternal.
-    """
-    print(f"-> [SISTEM MENGIRIM PESAN] Ke: {nama_kandidat} | Isi: {pesan}")
-    return f"Pesan berhasil dikirim ke {nama_kandidat}."
 
 # --- AUTO-DISCOVERY PLUGIN ---
 # Sistem akan membaca otomatis semua file python di folder 'plugins'

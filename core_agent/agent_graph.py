@@ -1,21 +1,20 @@
+import os
+import importlib
 import json
 import streamlit as st
 import sqlite3
 
-from typing import Dict, Any, Type, Callable
+from typing import Dict, Any, List, Type, Callable
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 #from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from .agent_nodes import (
-    AgentState,
-    panggil_otak_llm,
-    eksekutor_safe,
-    eksekutor_sensitive,
-    router_keputusan
+    AgentState
 )
 from .agent_tools import sqlite_db_path
+#from .graph_config import DEFAULT_GRAPH_CONFIG
 
 
 # ==========================================
@@ -59,51 +58,85 @@ def format_bulk_lowongan(args: Dict[str, Any]) -> str:
 # ==========================================
 # 2. CORE AGENT ENGINE
 # ==========================================
-class HRAgentEngine:
+class AgenticEngine:
     """Core Engine yang merakit dan mengeksekusi Graph LangGraph."""
-    def __init__(self, state_schema: Type = AgentState):
+    def __init__(self, state_schema: Type = AgentState, graph_config: List[Dict[str, Any]] = None):
         self.state_schema = state_schema
-        
-        # === OPSI A: MENGAKTIFKAN PERSISTENT CHECKPOINTER VIA SQLITE ===
-        # Gunakan check_same_thread=False agar tidak bentrok saat diakses multi-thread oleh Streamlit
         self.db_conn = sqlite3.connect(sqlite_db_path, check_same_thread=False)
         self.memory = SqliteSaver(self.db_conn)
-        # ===============================================================
         
         self.workflow = StateGraph(self.state_schema)
+        
+        # Proteksi mutlak: Tolak inisialisasi jika config kosong
+        if graph_config is None:
+            raise ValueError("Gagal memuat arsitektur AI! Pastikan file graph_config.py valid dan terbaca oleh Dynamic Loader.")
+            
+        self.graph_config = graph_config
+        
+        # Penampung daftar node mana saja yang butuh Persetujuan (HITL)
+        self.interrupt_before_nodes = []
+        self.interrupt_after_nodes = []
+        
+        # 1. Rakit Topologi Graf
         self._build_graph()
+        
+        # 2. Compile Graf dengan Interrupt Dynamic dari Konfigurasi
         self.executor = self.workflow.compile(
             checkpointer=self.memory,
-            interrupt_before=["node_sensitive"]
+            interrupt_before=self.interrupt_before_nodes,
+            interrupt_after=self.interrupt_after_nodes
         )
 
     def _build_graph(self):
-        """Membangun topologi graf secara internal."""
-        # 1. Daftarkan Nodes
-        self.workflow.add_node("node_ai", panggil_otak_llm)
-        self.workflow.add_node("node_safe", eksekutor_safe)
-        self.workflow.add_node("node_sensitive", eksekutor_sensitive)
+        """Membangun topologi graf dengan dukungan penuh seluruh fitur LangGraph."""
+        for item in self.graph_config:
+            item_type = item.get("type")
 
-        # 2. Rangkai Alur Edges
-        self.workflow.add_edge(START, "node_ai")
-        self.workflow.add_conditional_edges(
-            "node_ai", 
-            router_keputusan, 
-            {
-                "lanjut_ke_safe": "node_safe",
-                "lanjut_ke_sensitive": "node_sensitive",
-                "langsung_selesai": END
-            }
-        )
-        self.workflow.add_edge("node_safe", "node_ai")
-        self.workflow.add_edge("node_sensitive", "node_ai")
+            # --- A. PENDAFTARAN NODE (Bisa Fungsi Biasa ATAU Subgraph) ---
+            if item_type == "node":
+                # item["func"] bisa berupa fungsi biasa ATAU Compiled StateGraph (Subgraph)
+                self.workflow.add_node(item["name"], item["func"])
+                
+                # Cek apakah node ini butuh Interrupt (Human-in-the-Loop)
+                if item.get("interrupt_before", False):
+                    self.interrupt_before_nodes.append(item["name"])
+                if item.get("interrupt_after", False):
+                    self.interrupt_after_nodes.append(item["name"])
 
-    def run(self, user_input: str = None, thread_id: str = "hr_session_001", is_approval: bool = False, user_role: str = "Staff") -> Dict[str, Any]:
+            # --- B. EDGES BERSAMBUNG (Bisa Single target atau Parallel/Fan-Out) ---
+            elif item_type == "edge":
+                # item["end"] bisa berupa "node_b" ATAU list ["node_b", "node_c"] untuk PARALEL
+                self.workflow.add_edge(item["start"], item["end"])
+
+            # --- C. CONDITIONAL EDGES ---
+            elif item_type == "conditional_edge":
+                kwargs = {}
+                if "path_map" in item:
+                    kwargs["path_map"] = item["path_map"]
+                if "then" in item:
+                    kwargs["then"] = item["then"]
+                
+                self.workflow.add_conditional_edges(
+                    item["source"], 
+                    item["router"], 
+                    **kwargs
+                )
+
+            # --- D. BACKWARDS COMPATIBILITY ---
+            elif item_type == "entry_point":
+                self.workflow.set_entry_point(item["node"])
+            elif item_type == "finish_point":
+                self.workflow.set_finish_point(item["node"])
+
+            else:
+                print(f"⚠️ PERINGATAN: Tipe konfigurasi '{item_type}' tidak dikenali.")
+
+    def run(self, user_input: str = None, thread_id: str = "default_thread", is_approval: bool = False, user_role: str = "Staff") -> Dict[str, Any]:
         config = {"configurable": {"thread_id": thread_id, "user_role": user_role}}
         current_state = self.executor.get_state(config)
         
-        # Jika graf sedang PAUSED (menunggu persetujuan tool sensitif)
-        if current_state.next and "node_sensitive" in current_state.next:
+        # PERUBAHAN DI SINI: Deteksi Pause secara dinamis tanpa hardcode nama node
+        if current_state.next:
             if is_approval:
                 self.executor.invoke(None, config=config)
             else:
@@ -121,7 +154,6 @@ class HRAgentEngine:
                             )
                         )
                 
-                # Masukkan chat revisi dari HR
                 inputs_to_send.append(HumanMessage(content=user_input))
                 self.executor.invoke({"messages": inputs_to_send}, config=config)
                 
@@ -139,8 +171,8 @@ class StreamlitAgentAdapter:
     
     @staticmethod
     def process_state_to_ui(state) -> Dict[str, Any]:
-        # Skenario 1: Butuh Persetujuan (HITL)
-        if state.next and "node_sensitive" in state.next:
+        # PERUBAHAN DI SINI: Deteksi status butuh persetujuan secara universal
+        if state.next:
             pesan_terakhir = state.values["messages"][-1]
             tool_calls = getattr(pesan_terakhir, "tool_calls", [])
             
@@ -150,12 +182,14 @@ class StreamlitAgentAdapter:
                     nama_tool = tc["name"]
                     argumen_tool = tc["args"]
                     
-                    # Memanggil Formatter dinamis dari Registry
                     formatted_arg = ToolFormatterRegistry.format(nama_tool, argumen_tool)
                     detail_pesan.append(f"{idx}. Tool: **{nama_tool}**\n{formatted_arg}")
                 
+                # Menampilkan nama Node yang sedang ditahan (opsional untuk info debug UI)
+                node_tertahan = ", ".join(state.next)
+                
                 pesan_gabungan = (
-                    "### ⚠️ KONFIRMASI TINDAKAN SENSITIF\n"
+                    f"### ⚠️ KONFIRMASI TINDAKAN (Menunggu di: {node_tertahan})\n"
                     "AI memerlukan konfirmasi persetujuan Anda untuk melakukan tindakan berikut:\n\n" + 
                     "\n\n".join(detail_pesan)
                 )
@@ -202,9 +236,49 @@ class StreamlitAgentAdapter:
 # 4. IMPLEMENTASI SEHAT (Fungsi Bersih yang Dipanggil Frontend)
 # ==========================================
 # Gunakan cache agar Engine dan MemorySaver TIDAK hancur saat UI me-reload
+
+#@st.cache_resource
+#def get_agent_engine():
+#    return AgenticEngine()
+
 @st.cache_resource
 def get_agent_engine():
-    return HRAgentEngine()
+    """
+    Memuat engine dan mencari config graf secara dinamis 
+    dari folder 'agentgraph_config'.
+    """
+    
+    # 1. Baca Environment Variable. 
+    # Jika tidak diset, default-nya akan mengambil file 'default_graph' di dalam folder agentgraph_config
+    config_name = os.getenv("ACTIVE_AGENT_CONFIG", "graph_config")
+    
+    konfigurasi_aktif = None
+    
+    try:
+        # 2. Path dinamis menunjuk ke folder 'agentgraph_config'
+        # Format import module path: .agentgraph_config.<nama_file>
+        module_path = f".agentgraph_config.{config_name}"
+        
+        # 3. Import modul secara dinamis
+        modul = importlib.import_module(module_path, package=__package__)
+        
+        # 4. Ambil variabel skema graf di dalam file tersebut
+        if hasattr(modul, "GRAPH_CONFIG"):
+            konfigurasi_aktif = getattr(modul, "GRAPH_CONFIG")
+        elif hasattr(modul, "DEFAULT_GRAPH_CONFIG"):
+            konfigurasi_aktif = getattr(modul, "DEFAULT_GRAPH_CONFIG")
+        else:
+            raise AttributeError(f"File config '{config_name}.py' tidak memiliki variabel 'GRAPH_CONFIG' atau 'DEFAULT_GRAPH_CONFIG'.")
+            
+        print(f"✅ [Auto-Load] Berhasil memuat arsitektur graf dari: agentgraph_config/{config_name}.py")
+        
+    except ImportError as e:
+        print(f"⚠️ [Error] Gagal memuat config '{config_name}' dari folder agentgraph_config: {e}")
+    except Exception as e:
+        print(f"⚠️ [Error] Kesalahan pada konfigurasi graf: {e}")
+
+    # 5. Kembalikan instansiasi AgenticEngine dengan config terpilih
+    return AgenticEngine(graph_config=konfigurasi_aktif)
 
 engine = get_agent_engine()
 
