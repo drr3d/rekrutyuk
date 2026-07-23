@@ -5,6 +5,7 @@ import uuid
 from database.chat_db import init_chat_db, load_chat_history
 from database.knowledge_db import init_knowledge_db
 from database.interview_db import init_interview_db
+from database.lowongan_db import init_lowongan_db
 from core_agent.config import sqlite_db_path, app_dir
 
 from views import tab5_interview, tab4_lowongan, tab3_hrknowledge, tab2_cvkandidat, tab1_aichat
@@ -78,6 +79,7 @@ st.sidebar.info(f"Aktif sebagai: **{st.session_state.user_role}** ({st.session_s
 init_chat_db() # Pastikan tabel DB sudah ada
 init_knowledge_db()
 init_interview_db()
+init_lowongan_db()
 
 # 1. Manajemen Daftar Thread (Sesi)
 if "daftar_thread" not in st.session_state:

@@ -6,6 +6,10 @@ from ..agent_nodes import (
     router_keputusan
 )
 
+from ..agent_router import DecisionRouter
+from ..agent_tools import sensitive_tools
+dynamic_router = DecisionRouter(sensitive_tools=sensitive_tools)
+
 # SKEMA GRAF DEFAULT
 DEFAULT_GRAPH_CONFIG = [
     # 1. Pendaftaran Node
@@ -22,7 +26,7 @@ DEFAULT_GRAPH_CONFIG = [
     {
         "type": "conditional_edge",
         "source": "node_ai",
-        "router": router_keputusan,
+        "router": dynamic_router,
         "path_map": {
             "lanjut_ke_safe": "node_safe",
             "lanjut_ke_sensitive": "node_sensitive",
