@@ -29,6 +29,5 @@ Aplikasi **RekrutYuk** ini bukan sekadar aplikasi CRUD biasa atau chatbot pasif,
 
 *   **Human-in-the-Loop (HITL) Guardrail:** Aksi sensitif (seperti posting lowongan atau hapus data) dikunci oleh interupsi graf. AI tidak akan mengeksekusi ke database sebelum mengirimkan notifikasi konfirmasi ke Telegram Anda. Tekan **"IYA"**, baru Agen AI bergerak!
 *   **Anti-Amnesia Persistent Memory:** Ditenagai oleh `SqliteSaver`, yang membuat agen AI ini punya memori jangka panjang. Biarpun aplikasi di-restart atau komputer mati, Agen tetap ingat siapa kandidat terakhir yang sedang dibahas dan apa tugas terpendingnya.
-*   **Universal Polymorphic Ingestion:** Mesin pemroses *Agentic RAG* di dalam RekrutYuk dirancang modular. Hari ini Anda pakai untuk membaca CV recruitment, besok-besok logika engine ini bisa di-*jumper* untuk membaca nota penjualan sales atau manajemen inventori secara instan!
 
 ---

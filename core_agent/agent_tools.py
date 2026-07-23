@@ -101,8 +101,6 @@ def get_hybrid_retriever(top_k: int = 10):
         )
     return chroma_retriever
 
-
-
 # --- FUNGSI BACA CONFIG ---
 analytics_config_path = app_dir / "analytics_config.json"
 

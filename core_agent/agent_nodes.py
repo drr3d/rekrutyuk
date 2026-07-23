@@ -98,32 +98,6 @@ def panggil_otak_llm(state: AgentState):
     
     return {"messages": [response]}
 
-# ==========================================
-# --- 3. DEFINISI ROUTER (PENGATUR JALUR) ---
-# ==========================================
-def router_keputusan(state: AgentState) -> str:
-    """
-    Router AI Utama: Sangat sederhana dan anti-error.
-    Jika AI butuh tool, arahkan ke tool. Jika tidak, langsung selesai (ke User).
-    """
-    pesan_terakhir = state["messages"][-1]
-    
-    # Cek apakah AI Utama memanggil fungsi/tools
-    if pesan_terakhir.tool_calls:
-        nama_tool = pesan_terakhir.tool_calls[0]['name']
-        
-        # Pengecekan tool sensitif (seperti kirim email/pesan)
-        if any(nama_tool == t.name for t in sensitive_tools):
-            print(f"[Log Sistem] AI memutuskan memakai Tool SENSITIF -> {nama_tool}")
-            return "lanjut_ke_sensitive"
-        else:
-            print(f"[Log Sistem] AI memutuskan memakai Tool AMAN -> {nama_tool}")
-            return "lanjut_ke_safe"
-            
-    # Jika tidak ada pemanggilan tool, berarti AI sudah selesai menyusun jawaban final
-    print("[Log Sistem] Draf selesai. Langsung kirim jawaban ke User!")
-    return "langsung_selesai"
-
 # NODE 3 & 4: Tangan Eksekutor Tool
 eksekutor_safe = ToolNode(safe_tools)
 eksekutor_sensitive = ToolNode(sensitive_tools)

@@ -347,83 +347,8 @@ def update_database_catalog(filename: str, text_cv: str, model_name: str, recrea
     except Exception as e:
         print(f"-> [AI Extractor] Gagal mengekstrak/menyimpan profil ke database: {e}")
 
-# --- 3. FUNGSI UTAMA PEMROSESAN ---
-'''
 def process_cv(file_path):
-    filename = os.path.basename(file_path)
-    print(f"\n=== Memproses file: {filename} ===")
-    
-    # [NEW UPGRADE]: Validasi Jumlah Halaman di Detik Pertama
-    # Ini mencegah aplikasi macet (hang) jika kandidat melampirkan CV yang kepanjangan
-    try:
-        loader = PyPDFLoader(file_path)
-        documents = loader.load()
-        jumlah_halaman = len(documents)
-        
-        if jumlah_halaman > 5:
-            print(f"❌ [DITOLAK] File {filename} memiliki {jumlah_halaman} halaman (Maksimal 5).")
-            print("=== Selesai (Dibatalkan) ===\n")
-            return False
-            
-        print(f"-> [Validasi Lolos] CV terdiri dari {jumlah_halaman} halaman.")
-        
-    except PermissionError as e:
-        # [PERBAIKAN KRUSIAL]: Tangkap PermissionError spesifik dan lemparkan (raise) 
-        # kembali ke atas agar worker di resume_wdog.py bisa menangkapnya untuk melakukan Retry.
-        raise e
-        
-    except Exception as e:
-        # Error lain selain PermissionError akan dihentikan di sini agar tidak membebani sistem
-        print(f"❌ [ERROR] Gagal membaca PDF {filename}: {e}")
-        return
-    
-    # --- [DYNAMIC CONFIG] MEMBACA SETTING MODEL UNTUK EXTRACTOR ---
-    model_extractor_name = "qwen3.5:4b" 
-    if config_path.exists():
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = json.load(f)
-                model_extractor_name = config_data.get("model_extractor", "qwen3.5:4b")
-        except Exception:
-            pass
-            
-    try:
-        vector_db.delete(where={"source": filename})
-    except Exception:
-        pass 
-    
-    full_text = "\n".join(doc.page_content for doc in documents)
-    
-    # [OPTIMASI 3]: KOMPRESI SPASI EKSTREM UNTUK MERINGANKAN VRAM
-    # Meratakan teks dengan menghapus semua \n, tab, dan spasi ganda menjadi 1 spasi.
-    # Teks tetap utuh 100% sampai ujung bawah dokumen, tapi jumlah total karakternya 
-    # berkurang drastis sehingga GPU lebih cepat mengevaluasinya tanpa kehilangan akurasi kalender.
-    teks_untuk_json = re.sub(r'\s+', ' ', full_text).strip()
-    
-    # [PROSES 1: STRUCTURED RAG] - Ekstrak JSON menggunakan teks yang sudah dikompresi
-    #update_json_catalog(filename, teks_untuk_json, model_extractor_name)
-    # JANGAN LUPA SET KEMBALI recreate_db = False ketika sudah selesai
-    update_database_catalog(filename, teks_untuk_json, model_extractor_name, False)
-    
-    # [PROSES 2: UNSTRUCTURED RAG] - Split & Simpan ke ChromaDB
-    # Untuk vektor, TETAP gunakan full_text mentah agar tidak ada format (seperti list) yang rusak untuk Retrieval
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = text_splitter.split_documents(documents)
-    
-    ids = []
-    for i, chunk in enumerate(chunks):
-        chunk.metadata["source"] = filename
-        chunk.metadata["type"] = "resume"
-        unique_id = f"{filename}_{i}"
-        ids.append(unique_id)
-    
-    vector_db.add_documents(chunks, ids=ids)
-    print(f"-> [ChromaDB] Berhasil menyimpan {len(chunks)} chunk teks untuk {filename}!")
-    print("=== Selesai ===\n")
-    return True
-'''
-def process_cv(file_path):
-    # Mengambil nama file dari path lengkap (contoh: dari "C:/folder/cv_staff.pdf" jadi "cv_staff.pdf")
+    # Mengambil nama file dari path lengkap (contoh: dari "C:/folder/cv_aulia.pdf" jadi "cv_aulia.pdf")
     filename = os.path.basename(file_path)
     print(f"\n=== Memproses file: {filename} ===")
     
@@ -503,7 +428,7 @@ def process_cv(file_path):
         # Memberikan identitas (metadata) pada setiap potongan teks agar tahu teks ini asalnya dari CV siapa
         chunk.metadata["source"] = filename
         chunk.metadata["type"] = "resume"
-        # Membuat ID unik (contoh: "cv_user.pdf_0", "cv_staff.pdf_1")
+        # Membuat ID unik (contoh: "cv_aulia.pdf_0", "cv_aulia.pdf_1")
         ids.append(f"{filename}_{i}")
     
     # 1. Simpan potongan teks ini ke dalam ChromaDB (Berbasis Makna/Vektor)
