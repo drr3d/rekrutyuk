@@ -1,5 +1,5 @@
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, Any
 
 # Import LangChain & LangGraph components
 from langchain_core.messages import SystemMessage
@@ -14,18 +14,6 @@ from .agent_tools import (
     safe_tools,
     sensitive_tools
 )
-
-# ==========================================
-# --- 1. ARSITEKTUR CUSTOM STATEGRAPH ---
-# ==========================================
-class AgentState(TypedDict):
-    """
-    Representasi memori sentral untuk AI Agent.
-    - messages: Menyimpan riwayat obrolan (ditumpuk).
-    - revision_count: Menghitung berapa kali AI sudah direvisi.
-    """
-    messages: Annotated[list, add_messages]
-    revision_count: Annotated[int, operator.add]
 
 def optimasi_konteks_langchain(messages):
     """
@@ -70,33 +58,102 @@ def optimasi_konteks_langchain(messages):
     return cleaned_messages
 
 # ==========================================
+# --- 1. ARSITEKTUR CUSTOM STATEGRAPH ---
+# ==========================================
+class AgentState(TypedDict):
+    """
+    Representasi memori sentral untuk AI Agent.
+    - messages: Menyimpan riwayat obrolan (ditumpuk).
+    - revision_count: Menghitung berapa kali AI sudah direvisi.
+    """
+    messages: Annotated[list, add_messages]
+    revision_count: Annotated[int, operator.add]
+    pending_tasks: str # <-- Tambahan baru, untuk monitoring pending task
+
+# ==========================================
 # --- 2. DEFINISI NODE (KOMPONEN AI) ---
 # ==========================================
-def panggil_otak_llm(state: AgentState):
-    """NODE 1: Mengevaluasi pesan dan memutuskan tindakan (menjawab atau memanggil tool)."""
-    messages = state.get("messages", [])
+class AIBrainProcessor:
+    """
+    Komponen Otak Utama (Brain Node) untuk AI Agent.
+    Dibuat dengan struktur OOP minimalis tanpa parameter inisialisasi yang rumit.
+    """
     
-    # Injeksi System Prompt di posisi paling awal jika belum ada
-    if not messages or not isinstance(messages[0], SystemMessage):
-        messages = [SystemMessage(content=system_prompt)] + messages
+    def __init__(self, llm_model: Any, tools_list: list, base_prompt: str):
+        # Binding tools cukup dilakukan sekali saat class dibentuk
+        # (Memakai variabel 'llm' dan 'tools' global yang sudah di-import di file ini)
+        self.base_prompt = base_prompt
+        self._llm_with_tools = llm_model.bind_tools(tools_list)
 
-    # Bind tools agar LLM tahu dia punya kemampuan tambahan
-    llm_with_tools = llm.bind_tools(tools) 
-    
-    # [PERBAIKAN DI SINI]: Panggil fungsi optimasi untuk memangkas ToolMessage usang!
-    messages_dioptimalkan = optimasi_konteks_langchain(messages)
-    
-    print("\n[Log Sistem] AI Utama sedang menganalisis input atau menyusun jawaban...")
-    
-    # [PERBAIKAN DI SINI]: Kirim `messages_dioptimalkan`, BUKAN `messages` mentah
-    response = llm_with_tools.invoke(messages_dioptimalkan)
-    
-    print("\n--- [DAPUR AGENT: APA YANG DIPIKIRKAN LLM?] ---")
-    print(f"Content: {response.content}") 
-    print(f"Tool Calls: {response.tool_calls}") 
-    print("----------------------------------------------\n")
-    
-    return {"messages": [response]}
+    def _build_system_prompt(self, pending_tasks: str) -> str:
+        """Menggabungkan prompt dasar dengan status tugas yang masih gantung."""
+        # Memakai variabel 'system_prompt' global dari collection
+        prompt = self.base_prompt 
+        if pending_tasks:
+            prompt += (
+                f"\n\n[🚨 PERINGATAN SISTEM: Kamu memiliki instruksi dari user yang masih tertunda:\n"
+                f"{pending_tasks}\n"
+                f"Segera tindak lanjuti jika user sudah memberikan data yang dibutuhkan!]"
+            )
+        return prompt
+
+    def _extract_pending_tasks(self, response_content: str) -> str:
+        """Mengekstrak blok To-Do list (Scratchpad) dari balasan AI."""
+        if not response_content:
+            return ""
+            
+        marker = "### 📝 Status Tugas Aktif"
+        if marker in response_content:
+            parts = response_content.split(marker)
+            if len(parts) > 1:
+                return parts[1].strip()
+        return ""
+
+    def __call__(self, state: AgentState) -> dict:
+        """
+        Entry point yang dieksekusi oleh LangGraph.
+        Strukturnya dipertahankan sesuai fungsi panggil_otak_llm aslinya.
+        """
+        # Gunakan list() agar tidak mengubah pointer asli
+        messages = list(state.get("messages", []))
+        pending_tasks = state.get("pending_tasks", "")
+
+        # 1. Siapkan & Injeksi System Prompt Dinamis
+        current_system_prompt = self._build_system_prompt(pending_tasks)
+        
+        if messages and isinstance(messages[0], SystemMessage):
+            messages[0] = SystemMessage(content=current_system_prompt)
+        else:
+            messages.insert(0, SystemMessage(content=current_system_prompt))
+
+        # 2. Pangkas konteks usang (Memakai fungsi global)
+        messages_dioptimalkan = optimasi_konteks_langchain(messages)
+        
+        print("\n[Log Sistem] AI Utama sedang menganalisis input atau menyusun jawaban...")
+        
+        # 3. Panggil LLM
+        response = self._llm_with_tools.invoke(messages_dioptimalkan)
+        
+        print("\n--- [DAPUR AGENT: APA YANG DIPIKIRKAN LLM?] ---")
+        print(f"Content: {response.content}") 
+        print(f"Tool Calls: {response.tool_calls}") 
+        print("----------------------------------------------\n")
+        
+        # 4. Siapkan state balasan
+        update_state = {"messages": [response]}
+        
+        # 5. Intersep teks untuk simpan status tugas
+        if response.content:
+            update_state["pending_tasks"] = self._extract_pending_tasks(response.content)
+        else:
+            # Jika respon hanya memanggil tool tanpa teks, biarkan tugas pending sebelumnya (jangan ditimpa string kosong)
+            # Kecuali jika Anda ingin meresetnya. Untuk amannya, kita abaikan update jika tidak ada text.
+            pass
+
+        return update_state
+
+panggil_otak_llm = AIBrainProcessor(llm, tools, system_prompt)
+
 
 # NODE 3 & 4: Tangan Eksekutor Tool
 eksekutor_safe = ToolNode(safe_tools)

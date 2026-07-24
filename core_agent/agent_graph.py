@@ -7,12 +7,14 @@ import sqlite3
 from typing import Dict, Any, List, Type, Callable
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
+#from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from .agent_nodes import (
     AgentState
 )
 from .agent_tools import sqlite_db_path
+from .agent_adapter import StreamlitAgentAdapter
 
 # ==========================================
 # 1. UI REGISTRY (Agar Kontributor Bisa Menambah Custom View Tool)
@@ -161,82 +163,9 @@ class AgenticEngine:
         return self.executor.get_state(config)
 
 # ==========================================
-# 3. UI ADAPTER (Penterjemah State Mentah Graf -> Kebutuhan Frontend)
-# ==========================================
-class StreamlitAgentAdapter:
-    """Adapter untuk menerjemahkan State Graf ke format UI Streamlit."""
-    
-    @staticmethod
-    def process_state_to_ui(state) -> Dict[str, Any]:
-        # PERUBAHAN DI SINI: Deteksi status butuh persetujuan secara universal
-        if state.next:
-            pesan_terakhir = state.values["messages"][-1]
-            tool_calls = getattr(pesan_terakhir, "tool_calls", [])
-            
-            if tool_calls:
-                detail_pesan = []
-                for idx, tc in enumerate(tool_calls, 1):
-                    nama_tool = tc["name"]
-                    argumen_tool = tc["args"]
-                    
-                    formatted_arg = ToolFormatterRegistry.format(nama_tool, argumen_tool)
-                    detail_pesan.append(f"{idx}. Tool: **{nama_tool}**\n{formatted_arg}")
-                
-                # Menampilkan nama Node yang sedang ditahan (opsional untuk info debug UI)
-                node_tertahan = ", ".join(state.next)
-                
-                pesan_gabungan = (
-                    f"### ⚠️ KONFIRMASI TINDAKAN (Menunggu di: {node_tertahan})\n"
-                    "AI memerlukan konfirmasi persetujuan Anda untuk melakukan tindakan berikut:\n\n" + 
-                    "\n\n".join(detail_pesan)
-                )
-                return {
-                    "status": "butuh_persetujuan",
-                    "tool": tool_calls[0]["name"] if len(tool_calls) == 1 else "multiple_tools",
-                    "args": tool_calls[0]["args"] if len(tool_calls) == 1 else tool_calls,
-                    "pesan": pesan_gabungan
-                }
-
-        # Skenario 2: Ekstraksi Link Download
-        download_info = None
-        if "messages" in state.values:
-            for msg in reversed(state.values["messages"]):
-                if getattr(msg, "name", None) == "ambil_tautan_download_cv":
-                    try:
-                        res_data = json.loads(msg.content)
-                        if res_data.get("status") == "tersedia":
-                            download_info = {
-                                "nama_file": res_data["nama_file"],
-                                "path": res_data["path"]
-                            }
-                        break
-                    except Exception:
-                        pass
-
-        # Skenario 3: Ambil Jawaban Akhir
-        jawaban_final = "Maaf, tidak ada respons yang valid dari agen."
-        if "messages" in state.values:
-            for msg in reversed(state.values["messages"]):
-                if msg.type == "ai" and not getattr(msg, "tool_calls", None):
-                    if msg.content and msg.content.strip():
-                        jawaban_final = msg.content
-                        break
-
-        return {
-            "status": "selesai",
-            "pesan": jawaban_final,
-            "download_info": download_info
-        }
-
-
-# ==========================================
-# 4. IMPLEMENTASI SEHAT (Fungsi Bersih yang Dipanggil Frontend)
+# 4. Prepare to Frontend with Clean structure
 # ==========================================
 # Gunakan cache agar Engine dan MemorySaver TIDAK hancur saat UI me-reload
-
-#@st.cache_resource
-#def get_agent_engine():
-#    return AgenticEngine()
 
 @st.cache_resource
 def get_agent_engine():

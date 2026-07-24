@@ -1,9 +1,33 @@
 from typing import List, Any
 from .agent_nodes import AgentState
+from .agent_tools import sensitive_tools
 
 # ==========================================
 # --- 3. DEFINISI ROUTER (PENGATUR JALUR) ---
 # ==========================================
+def router_keputusan(state: AgentState) -> str:
+    """
+    Router AI Utama: Sangat sederhana dan anti-error.
+    Jika AI butuh tool, arahkan ke tool. Jika tidak, langsung selesai (ke User).
+    """
+    pesan_terakhir = state["messages"][-1]
+    
+    # Cek apakah AI Utama memanggil fungsi/tools
+    if pesan_terakhir.tool_calls:
+        nama_tool = pesan_terakhir.tool_calls[0]['name']
+        
+        # Pengecekan tool sensitif (seperti kirim email/pesan)
+        if any(nama_tool == t.name for t in sensitive_tools):
+            print(f"[Log Sistem] AI memutuskan memakai Tool SENSITIF -> {nama_tool}")
+            return "lanjut_ke_sensitive"
+        else:
+            print(f"[Log Sistem] AI memutuskan memakai Tool AMAN -> {nama_tool}")
+            return "lanjut_ke_safe"
+            
+    # Jika tidak ada pemanggilan tool, berarti AI sudah selesai menyusun jawaban final
+    print("[Log Sistem] Draf selesai. Langsung kirim jawaban ke User!")
+    return "langsung_selesai"
+
 class DecisionRouter:
     """
     Router Kelas untuk graf AI. Menggunakan prinsip modularitas agar
@@ -22,8 +46,19 @@ class DecisionRouter:
         MEKANISME UTAMA: Di sinilah otak penentuan cabang berada.
         Jika nanti ada percabangan baru (misal: otorisasi), ubah di sini.
         """
-        if hasattr(pesan_terakhir, "tool_calls") and pesan_terakhir.tool_calls:
-            nama_tool = pesan_terakhir.tool_calls[0]['name']
+        tool_calls = []
+        
+        # 1. Jika pesan berupa Object (Langchain BaseMessage)
+        if hasattr(pesan_terakhir, "tool_calls"):
+            tool_calls = pesan_terakhir.tool_calls
+        # 2. Jika pesan berupa Dictionary mentah (Quirk dari SqliteSaver)
+        elif isinstance(pesan_terakhir, dict):
+            tool_calls = pesan_terakhir.get("tool_calls", [])
+            
+        # Eksekusi logika routing jika tool_calls ditemukan
+        if tool_calls:
+            # Ambil nama tool dengan aman (handle wujud dict maupun object)
+            nama_tool = tool_calls[0].get('name') if isinstance(tool_calls[0], dict) else getattr(tool_calls[0], 'name', '')
             
             if self._is_sensitive(nama_tool):
                 self._logger(f"[Log Router] AI memutuskan memakai Tool SENSITIF -> {nama_tool}")
