@@ -1,10 +1,9 @@
 import os
 import importlib
-import json
 import streamlit as st
 import sqlite3
 
-from typing import Dict, Any, List, Type, Callable
+from typing import Dict, Any, List, Type
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.graph import StateGraph, START, END
 #from langgraph.checkpoint.memory import MemorySaver
@@ -15,44 +14,6 @@ from .agent_nodes import (
 )
 from .agent_tools import sqlite_db_path
 from .agent_adapter import StreamlitAgentAdapter
-
-# ==========================================
-# 1. UI REGISTRY (Agar Kontributor Bisa Menambah Custom View Tool)
-# ==========================================
-class ToolFormatterRegistry:
-    """Registry untuk memformat tampilan Tool di UI secara dinamis (Plugin System)."""
-    _registry: Dict[str, Callable[[Dict[str, Any]], str]] = {}
-
-    @classmethod
-    def register(cls, tool_name: str):
-        """Decorator untuk mendaftarkan parser tampilan tool baru."""
-        def decorator(func: Callable[[Dict[str, Any]], str]):
-            cls._registry[tool_name] = func
-            return func
-        return decorator
-
-    @classmethod
-    def format(cls, tool_name: str, args: Dict[str, Any]) -> str:
-        """Format argumen tool berdasarkan formatter yang terdaftar."""
-        if tool_name in cls._registry:
-            return cls._registry[tool_name](args)
-        # Default fallback formatter
-        return f"   Argumen: `{json.dumps(args, ensure_ascii=False)}`"
-
-
-# --- Contoh Kontributor Mendaftarkan Formatter khusus Lowongan Bulk ---
-@ToolFormatterRegistry.register("posting_lowongan_bulk")
-def format_bulk_lowongan(args: Dict[str, Any]) -> str:
-    data_lowongan = args.get("daftar_lowongan", [])
-    sub_detail = []
-    for idx, lw in enumerate(data_lowongan, 1):
-        sub_detail.append(
-            f"  {idx}. **{lw.get('posisi')}**\n"
-            f"     • Periode: {lw.get('tanggal_mulai')} s/d {lw.get('tanggal_selesai')}\n"
-            f"     • Keyword: {lw.get('keyword_wajib')}"
-        )
-    return f"Menyimpan {len(data_lowongan)} Lowongan Sekaligus:\n" + "\n".join(sub_detail)
-
 
 # ==========================================
 # 2. CORE AGENT ENGINE
